@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Water Body AI — Satellite Detection System</title>
+    <meta name="description" content="AI-powered water body detection using Sentinel-2 satellite imagery, Leaflet maps, and U-Net deep learning segmentation.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --primary: #06b6d4; --primary-dark: #0891b2; --primary-glow: rgba(6,182,212,0.25);
+            --accent: #3b82f6; --bg: #020917; --bg2: #040f1f;
+            --surface: rgba(255,255,255,0.04); --surface2: rgba(255,255,255,0.07);
+            --border: rgba(255,255,255,0.08); --text: #f1f5f9; --muted: #64748b;
+            --success: #10b981; --error: #ef4444; --water: #0ea5e9; --terminal-bg: #010610;
+        }
+        body { font-family: 'Inter',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; overflow-x:hidden; }
+        .bg-orbs { position:fixed; inset:0; pointer-events:none; z-index:0; }
+        .orb { position:absolute; border-radius:50%; filter:blur(80px); opacity:0.10; animation:drift 14s ease-in-out infinite alternate; }
+        .orb1 { width:500px;height:500px;background:#06b6d4;top:-100px;left:-100px;animation-delay:0s; }
+        .orb2 { width:400px;height:400px;background:#3b82f6;bottom:-80px;right:-80px;animation-delay:-5s; }
+        .orb3 { width:300px;height:300px;background:#8b5cf6;top:40%;left:50%;animation-delay:-10s; }
+        @keyframes drift { from{transform:translate(0,0) scale(1);} to{transform:translate(40px,30px) scale(1.1);} }
+        main { position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:40px 20px 80px; }
+        .header { text-align:center;margin-bottom:44px; }
+        .header-top { display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:18px;flex-wrap:wrap; }
+        .badge { display:inline-flex;align-items:center;gap:6px;background:var(--primary-glow);border:1px solid rgba(6,182,212,0.3);color:var(--primary);font-size:12px;font-weight:600;padding:4px 14px;border-radius:999px;letter-spacing:0.5px;text-transform:uppercase; }
+        .badge::before { content:'●';font-size:8px;animation:pulse 2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+
+        h1 { font-size:clamp(2rem,5vw,3.2rem);font-weight:700;background:linear-gradient(135deg,#f1f5f9 30%,var(--primary));-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1.15;margin-bottom:14px; }
+        .subtitle { color:var(--muted);font-size:1.05rem;max-width:600px;margin:0 auto;line-height:1.6; }
+        .card { background:var(--surface);border:1px solid var(--border);border-radius:24px;backdrop-filter:blur(20px);padding:36px;margin-bottom:28px; }
+        .card-title { font-size:1.05rem;font-weight:700;margin-bottom:20px;display:flex;align-items:center;gap:10px; }
+        /* Tabs */
+        .tab-bar { display:flex;gap:4px;background:rgba(0,0,0,0.3);border-radius:14px;padding:4px;margin-bottom:28px;border:1px solid var(--border); }
+        .tab-btn { flex:1;padding:11px 16px;border:none;background:none;color:var(--muted);font-family:'Inter',sans-serif;font-size:0.9rem;font-weight:600;cursor:pointer;border-radius:10px;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:7px; }
+        .tab-btn.active { background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;box-shadow:0 4px 15px var(--primary-glow); }
+        .tab-btn:hover:not(.active) { background:var(--surface2);color:var(--text); }
+        .tab-panel { display:none; }
+        .tab-panel.active { display:block; }
+        /* Map */
+        #map { height:460px;border-radius:18px;overflow:hidden;border:1px solid var(--border); }
+        .map-hint { background:rgba(6,182,212,0.12);border:1px solid rgba(6,182,212,0.25);border-radius:12px;padding:12px 18px;font-size:0.88rem;color:var(--primary);margin-bottom:16px;display:flex;align-items:center;gap:10px; }
+        .coords-display { display:flex;gap:12px;margin-top:14px;flex-wrap:wrap; }
+        .coord-chip { background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 16px;font-family:'JetBrains Mono',monospace;font-size:0.88rem;color:var(--primary);flex:1;min-width:140px;display:flex;align-items:center;gap:8px; }
+        .coord-label { color:var(--muted);font-size:0.75rem;font-family:'Inter',sans-serif;font-weight:600; }
+        /* Pipeline */
+        .pipeline { display:flex;align-items:center;background:rgba(0,0,0,0.25);border:1px solid var(--border);border-radius:16px;padding:16px 20px;margin:20px 0;overflow-x:auto; }
+        .pipe-step { display:flex;flex-direction:column;align-items:center;gap:6px;min-width:80px;padding:0 6px;opacity:0.35;transition:opacity 0.3s; }
+        .pipe-step.active { opacity:1; }
+        .pipe-step.done   { opacity:0.9; }
+        .pipe-icon { width:36px;height:36px;border-radius:50%;background:var(--surface2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;transition:all 0.3s; }
+        .pipe-step.active .pipe-icon { border-color:var(--primary);background:var(--primary-glow);box-shadow:0 0 12px var(--primary-glow); }
+        .pipe-step.done   .pipe-icon { border-color:var(--success);background:rgba(16,185,129,0.15); }
+        .pipe-label { font-size:0.7rem;color:var(--muted);text-align:center;font-weight:600;line-height:1.2; }
+        .pipe-arrow { color:var(--muted);font-size:1.1rem;flex-shrink:0;padding:0 2px; }
+        /* Buttons */
+        .btn-row { display:flex;justify-content:center;margin-top:20px;gap:12px;flex-wrap:wrap; }
+        .btn { display:inline-flex;align-items:center;gap:8px;padding:12px 26px;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:all 0.25s;letter-spacing:0.3px;font-family:'Inter',sans-serif; }
+        .btn-primary { background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;box-shadow:0 4px 20px var(--primary-glow); }
+        .btn-primary:hover:not(:disabled) { transform:translateY(-2px);box-shadow:0 8px 30px var(--primary-glow); }
+        .btn-primary:disabled { opacity:0.4;cursor:not-allowed;transform:none; }
+        .btn-ghost { background:var(--surface2);border:1px solid var(--border);color:var(--text); }
+        .btn-ghost:hover { background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2); }
+        .btn-success { background:linear-gradient(135deg,#10b981,#059669);color:#fff; }
+        .btn-success:hover { transform:translateY(-2px);box-shadow:0 6px 20px rgba(16,185,129,0.3); }
+        /* Loader */
+        .loader-wrap { display:none;flex-direction:column;align-items:center;gap:16px;padding:40px 0; }
+        .spinner { width:48px;height:48px;border:3px solid rgba(6,182,212,0.2);border-top-color:var(--primary);border-radius:50%;animation:spin 0.8s linear infinite; }
+        @keyframes spin { to{transform:rotate(360deg);} }
+        .loader-text { color:var(--muted);font-size:0.9rem; }
+        .loader-sub  { color:var(--primary);font-size:0.8rem;font-family:'JetBrains Mono',monospace; }
+        /* Error */
+        .error-msg { display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;border-radius:12px;padding:14px 18px;margin-top:16px;font-size:0.9rem; }
+        /* Results */
+        .results { display:none; }
+        .results-header { display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px; }
+        .results-title { font-size:1.1rem;font-weight:700;display:flex;align-items:center;gap:10px; }
+        .place-name { color:var(--primary);font-size:0.9rem;font-weight:500;margin-top:4px; }
+        .stat-chip { display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);color:#10b981;font-size:0.85rem;font-weight:600;padding:5px 14px;border-radius:999px; }
+        .images-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:16px; }
+        @media(max-width:700px){.images-grid{grid-template-columns:1fr;}}
+        .img-card { background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:16px;overflow:hidden; }
+        .img-card img { width:100%;aspect-ratio:1;object-fit:cover;display:block;transition:transform 0.3s; }
+        .img-card img:hover { transform:scale(1.02); }
+        .img-card-label { padding:12px 16px;font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:flex;align-items:center;gap:6px; }
+        .dot { width:8px;height:8px;border-radius:50%; }
+        .dot-orig{background:#94a3b8;} .dot-mask{background:#e2e8f0;} .dot-seg{background:var(--water);}
+        .stats-row { display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:20px; }
+        @media(max-width:700px){.stats-row{grid-template-columns:repeat(2,1fr);}}
+        .stat-box { background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;text-align:center; }
+        .stat-val { font-size:1.4rem;font-weight:700;color:var(--primary); }
+        .stat-lbl { font-size:0.75rem;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.5px; }
+        #result-map { height:360px;border-radius:16px;margin-top:20px;border:1px solid var(--border); }
+        /* Upload */
+        .upload-zone { border:2px dashed rgba(6,182,212,0.3);border-radius:18px;padding:50px 30px;text-align:center;cursor:pointer;transition:all 0.3s;background:rgba(6,182,212,0.02); }
+        .upload-zone:hover,.upload-zone.drag-over { border-color:var(--primary);background:rgba(6,182,212,0.06);transform:scale(1.005); }
+        .upload-zone input { display:none; }
+        .upload-icon { width:64px;height:64px;background:linear-gradient(135deg,rgba(6,182,212,0.2),rgba(59,130,246,0.2));border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:28px; }
+        .upload-title { font-size:1.1rem;font-weight:600;margin-bottom:8px; }
+        .upload-sub { color:var(--muted);font-size:0.9rem; }
+        .upload-sub span { color:var(--primary);font-weight:500; }
+        #preview-wrap { display:none; }
+        #preview-img { max-height:220px;border-radius:12px;object-fit:contain;width:100%;margin-bottom:12px; }
+        .preview-name { color:var(--muted);font-size:0.85rem; }
+
+    </style>
+</head>
+<body>
+<div class="bg-orbs"><div class="orb orb1"></div><div class="orb orb2"></div><div class="orb orb3"></div></div>
+<main>
+    <header class="header">
+        <div class="header-top">
+            <div class="badge">AI Powered</div>
+
+        </div>
+        <h1>Water Body<br>Detection System</h1>
+        <p class="subtitle">Select any location on the map &rarr; Sentinel-2 satellite image is fetched &rarr; U-Net AI detects water bodies &rarr; Area calculated in real-time.</p>
+    </header>
+
+    <div class="tab-bar">
+        <button class="tab-btn active" id="tab-map-btn" onclick="switchTab('map')">🗺️ Location Detection</button>
+        <button class="tab-btn" id="tab-upload-btn" onclick="switchTab('upload')">📁 Upload Image</button>
+
+    </div>
+
+    <!-- ═══ TAB: MAP ═══ -->
+    <div class="tab-panel active" id="tab-map">
+        <div class="card">
+            <div class="card-title">🗺️ Click to Select Location</div>
+            <div class="pipeline" id="pipeline-bar">
+                <div class="pipe-step" id="ps-select"><div class="pipe-icon">📍</div><div class="pipe-label">Select<br>Location</div></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-step" id="ps-gee"><div class="pipe-icon">🛰️</div><div class="pipe-label">Earth<br>Engine</div></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-step" id="ps-sentinel"><div class="pipe-icon">📡</div><div class="pipe-label">Sentinel-2<br>Image</div></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-step" id="ps-unet"><div class="pipe-icon">🧠</div><div class="pipe-label">U-Net<br>Model</div></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-step" id="ps-segment"><div class="pipe-icon">🌊</div><div class="pipe-label">Water<br>Segment</div></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-step" id="ps-area"><div class="pipe-icon">📐</div><div class="pipe-label">Calculate<br>Area</div></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-step" id="ps-geojson"><div class="pipe-icon">📦</div><div class="pipe-label">GeoJSON<br>Export</div></div>
+            </div>
+            <div class="map-hint">📌 Click anywhere on the map to drop a pin and detect water bodies at that location</div>
+            <div id="map"></div>
+            <div class="coords-display" id="coords-display" style="display:none">
+                <div class="coord-chip"><span class="coord-label">LAT</span><span id="coord-lat">—</span></div>
+                <div class="coord-chip"><span class="coord-label">LON</span><span id="coord-lon">—</span></div>
+                <div class="coord-chip" style="flex:2"><span class="coord-label">PLACE</span><span id="coord-place" style="color:var(--text);font-size:0.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</span></div>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-ghost" id="map-clear-btn" style="display:none" onclick="clearMapSelection()">✕ Clear</button>
+                <button class="btn btn-primary" id="detect-btn" disabled>🛰️ Detect Water Bodies</button>
+            </div>
+            <div class="error-msg" id="map-error"></div>
+            <div class="loader-wrap" id="map-loader">
+                <div class="spinner"></div>
+                <div class="loader-text" id="loader-text">Connecting to Earth Engine…</div>
+                <div class="loader-sub" id="loader-sub">This may take 30–90 seconds</div>
+            </div>
+        </div>
+
+        <div class="card results" id="map-results">
+            <div class="results-header">
+                <div>
+                    <div class="results-title">🌊 Water Body Analysis</div>
+                    <div class="place-name" id="result-place">—</div>
+                </div>
+                <div class="stat-chip" id="result-chip">— % water</div>
+            </div>
+            <div class="images-grid">
+                <div class="img-card"><img id="result-sat" src="" alt="Satellite"><div class="img-card-label"><span class="dot dot-orig"></span>Sentinel-2</div></div>
+                <div class="img-card"><img id="result-mask" src="" alt="Mask"><div class="img-card-label"><span class="dot dot-mask"></span>Predicted Mask</div></div>
+                <div class="img-card"><img id="result-overlay" src="" alt="Overlay"><div class="img-card-label"><span class="dot dot-seg"></span>Water Overlay</div></div>
+            </div>
+            <div class="stats-row">
+                <div class="stat-box"><div class="stat-val" id="res-pct">—</div><div class="stat-lbl">Water %</div></div>
+                <div class="stat-box"><div class="stat-val" id="res-ha">—</div><div class="stat-lbl">Area (ha)</div></div>
+                <div class="stat-box"><div class="stat-val" id="res-km2">—</div><div class="stat-lbl">Area (km²)</div></div>
+                <div class="stat-box"><div class="stat-val" id="res-px">—</div><div class="stat-lbl">Water Pixels</div></div>
+            </div>
+            <div class="card-title" style="margin-top:28px;margin-bottom:12px">🗺️ Water Polygon on Map</div>
+            <div id="result-map"></div>
+            <div class="btn-row" style="margin-top:20px">
+                <button class="btn btn-success" id="dl-geojson-btn" style="display:none">⬇ Download GeoJSON</button>
+                <button class="btn btn-ghost" id="dl-shp-btn" style="display:none">⬇ Download Shapefile</button>
+                <button class="btn btn-ghost" onclick="clearMapResults()">↩ New Detection</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ TAB: UPLOAD ═══ -->
+    <div class="tab-panel" id="tab-upload">
+        <div class="card">
+            <div class="card-title">🛰️ Upload Satellite Image</div>
+            <div class="upload-zone" id="drop-zone">
+                <input type="file" id="file-input" accept="image/*" style="display:none">
+                <div id="default-content" onclick="document.getElementById('file-input').click()">
+                    <div class="upload-icon">🛰️</div>
+                    <div class="upload-title">Drop your satellite image here</div>
+                    <div class="upload-sub">or <span>browse files</span>&nbsp;·&nbsp; JPG, PNG, TIFF</div>
+                </div>
+                <div id="preview-wrap"><img id="preview-img" src="" alt="Preview"><div class="preview-name" id="file-name"></div></div>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-ghost" id="clear-btn" style="display:none" onclick="clearAll(event)">✕ Clear</button>
+                <button class="btn btn-primary" id="predict-btn" disabled>🔍 Detect Water Bodies</button>
+            </div>
+            <div class="error-msg" id="upload-error"></div>
+            <div class="loader-wrap" id="upload-loader"><div class="spinner"></div><div class="loader-text">Running U-Net segmentation model…</div></div>
+        </div>
+        <div class="card results" id="upload-results">
+            <div class="results-header">
+                <div class="results-title">🌊 Segmentation Result</div>
+                <div class="stat-chip" id="coverage-chip">— % water</div>
+            </div>
+            <div class="images-grid">
+                <div class="img-card"><img id="img-original" src="" alt="Original"><div class="img-card-label"><span class="dot dot-orig"></span>Original</div></div>
+                <div class="img-card"><img id="img-mask" src="" alt="Mask"><div class="img-card-label"><span class="dot dot-mask"></span>Predicted Mask</div></div>
+                <div class="img-card"><img id="img-overlay" src="" alt="Overlay"><div class="img-card-label"><span class="dot dot-seg"></span>Water Overlay</div></div>
+            </div>
+            <div class="stats-row">
+                <div class="stat-box"><div class="stat-val" id="stat-coverage">—</div><div class="stat-lbl">Water Coverage</div></div>
+                <div class="stat-box"><div class="stat-val" id="stat-pixels">—</div><div class="stat-lbl">Water Pixels</div></div>
+                <div class="stat-box"><div class="stat-val" id="stat-model">U-Net</div><div class="stat-lbl">Model</div></div>
+                <div class="stat-box"><div class="stat-val" id="stat-params">—</div><div class="stat-lbl">Parameters</div></div>
+            </div>
+            <div class="btn-row" style="margin-top:20px">
+                <button class="btn btn-ghost" id="download-btn">⬇ Download Overlay</button>
+                <button class="btn btn-ghost" id="download-mask-btn">⬇ Download Mask</button>
+                <button class="btn btn-ghost" onclick="clearAll()">↩ New Image</button>
+            </div>
+        </div>
+    </div>
+
+
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ─────────────────────────────────────────────────────────────
+// TAB SYSTEM
+// ─────────────────────────────────────────────────────────────
+function switchTab(name) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    document.getElementById('tab-' + name + '-btn').classList.add('active');
+    if (name === 'map' && !mapInitialized) initMap();
+}
+
+// ─────────────────────────────────────────────────────────────
+// LEAFLET MAP
+// ─────────────────────────────────────────────────────────────
+var map, marker, resultMap, resultLayer;
+var selectedLat = null, selectedLon = null, mapInitialized = false;
+
+function initMap() {
+    if (mapInitialized) return;
+    mapInitialized = true;
+    map = L.map('map').setView([20, 78], 5);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO', maxZoom: 19
+    }).addTo(map);
+    map.on('click', function(e) {
+        selectedLat = parseFloat(e.latlng.lat.toFixed(6));
+        selectedLon = parseFloat(e.latlng.lng.toFixed(6));
+        if (marker) marker.remove();
+        marker = L.circleMarker([selectedLat, selectedLon], {
+            radius: 10, fillColor: '#06b6d4', color: '#fff', weight: 2, opacity: 1, fillOpacity: 0.85
+        }).addTo(map).bindPopup('<b>📍 Selected</b><br>' + selectedLat + ', ' + selectedLon).openPopup();
+        document.getElementById('coord-lat').textContent = selectedLat;
+        document.getElementById('coord-lon').textContent = selectedLon;
+        document.getElementById('coord-place').textContent = 'Fetching…';
+        document.getElementById('coords-display').style.display = 'flex';
+        document.getElementById('map-clear-btn').style.display = 'inline-flex';
+        document.getElementById('detect-btn').disabled = false;
+        setPipelineStep('select');
+        fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + selectedLat + '&lon=' + selectedLon + '&zoom=10', {
+            headers: {'User-Agent': 'water-body-app'}
+        }).then(function(r){ return r.json(); }).then(function(d){
+            document.getElementById('coord-place').textContent = d.display_name || (selectedLat + ', ' + selectedLon);
+        }).catch(function(){ document.getElementById('coord-place').textContent = selectedLat + ', ' + selectedLon; });
+    });
+}
+
+window.addEventListener('load', function() { initMap(); });
+
+function clearMapSelection() {
+    selectedLat = null; selectedLon = null;
+    if (marker) { marker.remove(); marker = null; }
+    document.getElementById('coords-display').style.display = 'none';
+    document.getElementById('map-clear-btn').style.display = 'none';
+    document.getElementById('detect-btn').disabled = true;
+    document.getElementById('map-results').style.display = 'none';
+    document.getElementById('map-error').style.display = 'none';
+    resetPipeline();
+}
+function clearMapResults() { clearMapSelection(); }
+
+// ─────────────────────────────────────────────────────────────
+// PIPELINE INDICATOR
+// ─────────────────────────────────────────────────────────────
+var PIPE_STEPS = ['select','gee','sentinel','unet','segment','area','geojson'];
+function resetPipeline() {
+    PIPE_STEPS.forEach(function(s){ var el=document.getElementById('ps-'+s); if(el){el.classList.remove('active','done');} });
+}
+function setPipelineStep(step) {
+    resetPipeline();
+    var idx = PIPE_STEPS.indexOf(step);
+    PIPE_STEPS.forEach(function(s,i){ var el=document.getElementById('ps-'+s); if(!el)return; if(i<idx)el.classList.add('done'); else if(i===idx)el.classList.add('active'); });
+}
+function completePipeline() {
+    PIPE_STEPS.forEach(function(s){ var el=document.getElementById('ps-'+s); if(el)el.classList.add('done'); });
+}
+
+// ─────────────────────────────────────────────────────────────
+// DETECT WATER — LOCATION PIPELINE
+// ─────────────────────────────────────────────────────────────
+document.getElementById('detect-btn').addEventListener('click', async function() {
+    if (selectedLat === null) return;
+    document.getElementById('detect-btn').disabled = true;
+    document.getElementById('map-loader').style.display = 'flex';
+    document.getElementById('map-results').style.display = 'none';
+    document.getElementById('map-error').style.display = 'none';
+    var loaderText = document.getElementById('loader-text');
+    var loaderSub  = document.getElementById('loader-sub');
+    var stages = [
+        ['🛰️ Connecting to Earth Engine…', 'Authenticating with Google ADC'],
+        ['📡 Fetching Sentinel-2 imagery…', 'Searching cloud-free images (may take 20–60s)'],
+        ['🧠 Running U-Net water segmentation…', 'Processing 512×512 satellite patch'],
+        ['📐 Calculating water area…', 'Reprojecting to UTM for accurate area'],
+    ];
+    var stageIdx = 0;
+    var pipeSteps = ['gee','sentinel','unet','area'];
+    setPipelineStep('gee');
+    var stageTimer = setInterval(function() {
+        stageIdx = Math.min(stageIdx + 1, stages.length - 1);
+        loaderText.textContent = stages[stageIdx][0];
+        loaderSub.textContent  = stages[stageIdx][1];
+        if (stageIdx < pipeSteps.length) setPipelineStep(pipeSteps[stageIdx]);
+    }, 18000);
+    try {
+        var res = await fetch('/api/detect-location-water', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({lat: selectedLat, lon: selectedLon})
+        });
+        clearInterval(stageTimer);
+        var data = await res.json();
+        if (!res.ok) { showMapError(data.error || 'Detection failed.'); return; }
+        setPipelineStep('geojson');
+        completePipeline();
+        displayMapResults(data);
+    } catch(err) {
+        clearInterval(stageTimer);
+        showMapError('Cannot reach the server. Make sure server.py is running on port 5000.');
+    } finally {
+        document.getElementById('map-loader').style.display = 'none';
+        document.getElementById('detect-btn').disabled = false;
+    }
+});
+
+function displayMapResults(data) {
+    document.getElementById('result-sat').src     = data.satellite_b64 || '';
+    document.getElementById('result-mask').src    = data.mask_b64 || '';
+    document.getElementById('result-overlay').src = data.overlay_b64 || '';
+    document.getElementById('result-place').textContent = data.place_name || (data.lat + ', ' + data.lon);
+    document.getElementById('result-chip').textContent  = (data.water_percent || 0) + '% water';
+    document.getElementById('res-pct').textContent  = (data.water_percent || 0) + '%';
+    document.getElementById('res-ha').textContent   = data.water_area_ha != null ? data.water_area_ha.toFixed(2) + ' ha' : '—';
+    document.getElementById('res-km2').textContent  = data.water_area_km2 != null ? data.water_area_km2.toFixed(4) + ' km²' : '—';
+    document.getElementById('res-px').textContent   = data.water_pixels ? data.water_pixels.toLocaleString() : '—';
+    if (data.geojson) {
+        var blob = new Blob([JSON.stringify(data.geojson, null, 2)], {type:'application/json'});
+        var url  = URL.createObjectURL(blob);
+        var dlBtn = document.getElementById('dl-geojson-btn');
+        dlBtn.style.display = 'inline-flex';
+        dlBtn.onclick = function() { var a=document.createElement('a'); a.href=url; a.download='water_' + data.uid + '.geojson'; a.click(); };
+    }
+    if (data.shapefile_zip_url) {
+        var dlShp = document.getElementById('dl-shp-btn');
+        dlShp.style.display = 'inline-flex';
+        dlShp.onclick = function() { window.location.href = data.shapefile_zip_url; };
+    }
+    document.getElementById('map-results').style.display = 'block';
+    document.getElementById('map-results').scrollIntoView({behavior:'smooth'});
+    setTimeout(function(){ initResultMap(data); }, 200);
+}
+
+function initResultMap(data) {
+    if (resultMap) { resultMap.remove(); resultMap = null; }
+    resultMap = L.map('result-map').setView([data.lat, data.lon], 12);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19
+    }).addTo(resultMap);
+    L.circleMarker([data.lat, data.lon], {
+        radius: 8, fillColor: '#06b6d4', color: '#fff', weight: 2, fillOpacity: 0.9
+    }).addTo(resultMap).bindPopup('📍 ' + (data.place_name || 'Selected Location')).openPopup();
+    if (data.geojson && data.geojson.features && data.geojson.features.length > 0) {
+        resultLayer = L.geoJSON(data.geojson, {
+            style: {color:'#06b6d4', weight:2, fillColor:'#0ea5e9', fillOpacity:0.35}
+        }).addTo(resultMap);
+        try { resultMap.fitBounds(resultLayer.getBounds(), {padding:[20,20]}); } catch(e) {}
+    }
+}
+
+function showMapError(msg) {
+    var el = document.getElementById('map-error');
+    el.textContent = '⚠ ' + msg; el.style.display = 'block';
+    resetPipeline(); setPipelineStep('select');
+}
+
+// ─────────────────────────────────────────────────────────────
+// UPLOAD IMAGE PREDICT
+// ─────────────────────────────────────────────────────────────
+var fileInput   = document.getElementById('file-input');
+var dropZone    = document.getElementById('drop-zone');
+var predictBtn  = document.getElementById('predict-btn');
+var clearBtn    = document.getElementById('clear-btn');
+var selectedFile = null;
+
+dropZone.addEventListener('dragover', function(e){ e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', function(){ dropZone.classList.remove('drag-over'); });
+dropZone.addEventListener('drop', function(e){ e.preventDefault(); dropZone.classList.remove('drag-over'); if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', function(e){ if(e.target.files.length) handleFile(e.target.files[0]); });
+
+function handleFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+        var err=document.getElementById('upload-error'); err.textContent='⚠ Please upload a valid image file.'; err.style.display='block'; return;
+    }
+    selectedFile = file;
+    var reader = new FileReader();
+    reader.onload = function(ev){ document.getElementById('preview-img').src=ev.target.result; document.getElementById('file-name').textContent=file.name+' ('+(file.size/1024).toFixed(1)+' KB)'; document.getElementById('default-content').style.display='none'; document.getElementById('preview-wrap').style.display='block'; };
+    reader.readAsDataURL(file);
+    predictBtn.disabled = false; clearBtn.style.display = 'inline-flex';
+    document.getElementById('upload-results').style.display = 'none';
+    document.getElementById('upload-error').style.display = 'none';
+}
+function clearAll(e) {
+    if(e) e.preventDefault();
+    selectedFile=null; fileInput.value=''; document.getElementById('preview-img').src='';
+    document.getElementById('default-content').style.display='block'; document.getElementById('preview-wrap').style.display='none';
+    predictBtn.disabled=true; clearBtn.style.display='none';
+    document.getElementById('upload-results').style.display='none';
+    document.getElementById('upload-error').style.display='none';
+}
+predictBtn.addEventListener('click', async function() {
+    if (!selectedFile) return;
+    var formData = new FormData(); formData.append('image', selectedFile);
+    predictBtn.disabled=true; document.getElementById('upload-loader').style.display='flex';
+    document.getElementById('upload-results').style.display='none'; document.getElementById('upload-error').style.display='none';
+    try {
+        var res = await fetch('/predict', {method:'POST', body:formData});
+        var data = await res.json();
+        if (res.ok) {
+            document.getElementById('img-original').src=data.original; document.getElementById('img-mask').src=data.mask; document.getElementById('img-overlay').src=data.overlay;
+            document.getElementById('stat-coverage').textContent=(data.water_percent!=null?data.water_percent.toFixed(1):'?')+'%';
+            document.getElementById('stat-pixels').textContent=data.water_pixels!=null?data.water_pixels.toLocaleString():'?';
+            document.getElementById('coverage-chip').textContent=(data.water_percent!=null?data.water_percent.toFixed(1):'?')+'% water';
+            document.getElementById('upload-results').style.display='block';
+            document.getElementById('download-btn').onclick=function(){var a=document.createElement('a');a.href=data.overlay;a.download='water_overlay.jpg';a.click();};
+            document.getElementById('download-mask-btn').onclick=function(){var a=document.createElement('a');a.href=data.mask;a.download='water_mask.jpg';a.click();};
+        } else {
+            var err2=document.getElementById('upload-error'); err2.textContent='⚠ '+(data.error||'Prediction failed.'); err2.style.display='block';
+        }
+    } catch(err) {
+        var err3=document.getElementById('upload-error'); err3.textContent='⚠ Cannot reach server on port 5000.'; err3.style.display='block';
+    } finally { predictBtn.disabled=false; document.getElementById('upload-loader').style.display='none'; }
+});
+
+
+</script>
+</body>
+</html>

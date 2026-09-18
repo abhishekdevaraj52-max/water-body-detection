@@ -1,0 +1,15 @@
+flask
+opencv-python
+numpy
+tensorflow
+scikit-learn
+Pillow
+requests
+python-dotenv
+rasterio
+geopandas
+shapely
+earthengine-api
+google-auth
+streamlit
+pandas

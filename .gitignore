@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+venv_old/
+tf_gpu/
+
+# Environment / secrets
+.env
+
+# Temporary files
+tmp/
+*.tmp
+
+# Generated outputs
+outputs/
+exports/
+
+# Local database
+database/*.db
+database/*.sqlite
+database/*.sqlite3
+
+# Model cache / checkpoints
+*.ckpt
+*.h5.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
